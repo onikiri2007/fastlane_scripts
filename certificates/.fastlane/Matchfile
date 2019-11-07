@@ -1,0 +1,7 @@
+git_url "git@bitbucket.org:bluechilli/certificates.git"
+
+#type "development" # The default type, can be: appstore, adhoc, enterprise or development
+#git_branch "enterprise"
+
+# For all available options run `fastlane match --help`
+# Remove the # in the beginning of the line to enable the other options

@@ -1,0 +1,597 @@
+fastlane_require 'match'
+fastlane_require 'fastlane_core'
+fastlane_require 'fileutils'
+fastlane_require 'terminal-table'
+fastlane_require 'shellwords'
+fastlane_require 'highline/import'
+fastlane_require 'spaceship'
+fastlane_require 'json'
+
+# More documentation about how to customize your build
+# can be found here:
+# https://docs.fastlane.tools
+fastlane_version "1.109.0"
+
+# This value helps us track success metrics for Fastfiles
+# we automatically generate. Feel free to remove this line
+# once you get things running smoothly!
+generated_fastfile_id "5fc002ba-de6a-4950-8d1c-191d2d523d44"
+
+default_platform :ios
+
+# Fastfile actions accept additional configuration, but
+# don't worry, fastlane will prompt you for required
+# info which you can add here later
+
+config = CredentialsManager::AppfileConfig
+
+apple_id = config.try_fetch_value(:apple_id)
+dev_bundle_identifier = "com.bluechilli.d."
+stg_bundle_identifier = "com.bluechilli.s."
+push_notification_cert_password_key = "com.bluechilli.PushNotificationCertificatePassword"
+app_identifiers_config= "app-identifiers.json"
+fastlane_script_git_url = "git@bitbucket.org:bluechilli/fastlane_scripts.git"
+
+# Login to developer portal
+Spaceship::Portal.login(apple_id)
+
+git_branch_enterprise = "enterprise"
+push_cert_git_branch_enterprise = "enterprise_push"
+
+lane :certificate_cli do |options|
+   keychain_name = options[:keychain_name]
+   keychain_password = options[:keychain_password]
+   teams = Spaceship::Portal.client.teams
+   teams.collect { |t| certificates(team_id: t["teamId"], readonly: true, keychain_name: keychain_name, keychain_password: keychain_password); }
+end
+
+#### INSTALL CERTIFICATES / PROFILES ####
+lane :certificates do |options|
+    readonly = options[:readonly]
+    recreate = options[:recreate]
+    team_id = options[:team_id]
+    keychain_name = options[:keychain_name]
+    keychain_password = options[:keychain_password]
+  
+    if readonly == nil 
+        readonly = true;
+    end
+
+    if recreate == nil 
+        recreate = false;
+    end
+
+    if !team_id
+        team_id = choose_team() 
+    end
+
+    client = Spaceship::Portal.client
+    client.team_id = team_id
+    is_enterprise = is_in_house()    
+    available_apps = Spaceship.app.all
+    UI.message("is_enterprise" + "#{is_enterprise}")
+
+    if is_enterprise
+        # Filter the Dev and Staging apps
+        dev_apps = available_apps.select { |a| a.bundle_id.include? dev_bundle_identifier }
+        stg_apps = available_apps.select { |a| a.bundle_id.include? stg_bundle_identifier }
+        dev_bundle_identifiers = dev_apps.collect { |a| "#{a.bundle_id}"}
+        stg_bundle_identifiers = stg_apps.collect { |a| "#{a.bundle_id}"}
+        bundle_identifiers = dev_bundle_identifiers.concat(stg_bundle_identifiers)
+        match(type:'development', app_identifier: bundle_identifiers, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        match(type:'enterprise', app_identifier: stg_bundle_identifiers, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+    else
+        bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
+        apple_bundle_identifier = "#{bundle_identifier}."
+        exclude_id = "#{apple_bundle_identifier}*"
+        prod_apps = available_apps.select { |a| a.bundle_id.include? apple_bundle_identifier }
+        all_apps = prod_apps.select { |a| a.bundle_id != exclude_id }
+        bundle_identifiers = all_apps.collect { |a| "#{a.bundle_id}"}
+        match(type:'appstore', app_identifier: bundle_identifiers, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+    end    
+end
+
+#### INSTALL CERTIFICATES / PROFILES ####
+lane :certificate do |options|
+    readonly = options[:readonly]
+    recreate = options[:recreate]
+    team_id = options[:team_id]
+    env = options[:env]
+    keychain_name = options[:keychain_name]
+    keychain_password = options[:keychain_password]
+ 
+    if !options[:name] 
+        UI.user_error!("Please provide a value for the name parameter")
+    end
+
+    app_name = options[:name]
+
+    if readonly == nil 
+        readonly = true;
+    end
+
+    if recreate == nil 
+        recreate = false;
+    end
+
+    if !team_id
+        team_id = choose_team() 
+    end
+
+    is_enterprise = is_in_house()    
+    UI.message("is_enterprise" + "#{is_enterprise}")
+
+    if is_enterprise
+        # Filter the Dev and Staging apps
+        if !env || env == "development"
+            dev_app = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
+            match(type:'development', app_identifier: dev_app, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
+
+        if !env || env == "staging"
+            stg_app = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
+            match(type:'enterprise', app_identifier: stg_app, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
+            
+    else
+        app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
+        match(type:'appstore', app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+    end    
+end 
+
+#### INSTALL PUSH NOTIFICATION CERTIFICATES ####
+lane :push_notification_certificates do |options|
+    #prompt for password only if not present in local keychain    
+  
+    git_url = get_git_url()
+
+    if !git_url
+        UI.user_error!("Please specify git repository for push certificate in Matchfile")
+    end
+
+    UI.message("Git repo: " + git_url)
+
+    team_id = choose_team()           
+    client = Spaceship::Portal.client
+    client.team_id = team_id
+    is_enterprise = is_in_house()
+    keychain_password = options[:keychain_password]
+ 
+    #download push notification certificate repo branch
+    git_branch = ""
+
+    if is_enterprise
+        git_branch = push_cert_git_branch_enterprise
+    else 
+        git_branch = "#{team_id}_push"
+    end    
+
+    storage = Match::Storage.for_mode("git",{
+        git_url: git_url,
+        shallow_clone: false,
+        git_branch: git_branch
+    })
+
+    storage.download
+
+    encryption = Match::Encryption.for_storage_mode("git", { git_url: git_url, working_directory: storage.working_directory, git_branch: git_branch})
+    encryption.decrypt_files
+
+    UI.message("Repo dir: " + storage.working_directory)
+
+    files = Dir.glob(storage.working_directory + "/**/*.p12")
+            
+    #loop through all p12 files and import them in the keychain
+    files.each { |file|         
+        UI.message("Importing: " + file)
+        import_push_notification_certificate(file_path:file,  keychain_password: keychain_password)
+    }
+
+    #delete cloned repo folder
+    storage.clear_changes
+    
+end
+
+#### CREATE NEW APP ####
+lane :setup_app do |options| 
+
+    team_id = choose_team()             
+    client = Spaceship::Portal.client
+    client.team_id = team_id
+    is_enterprise = is_in_house()
+  
+    if !options[:name] 
+        UI.user_error!("Please provide a value for the name parameter")
+    end
+
+    app_name = options[:name]
+    env = get_environment(options)
+    services = options[:enable_services]
+    default_enable_services = get_default_enabled_services()
+
+    enabled_services = default_enable_services
+
+    if(services)
+        service_items = services.split(',')
+        symbols = service_items.map { |i| i.to_sym }
+        extra_enable_service = Hash[symbols.collect { |item| [item, "on"] } ]
+        enabled_services = extra_enable_service.merge(default_enable_services)
+    end
+
+    if (env != "development" && env != "staging" && env != "production")
+        UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
+    end
+
+    if !is_enterprise
+        env = "production"
+    end
+    
+    if is_enterprise
+        dev_app_identifier = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
+        stg_app_identifier = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
+
+        if env == "development"
+            desc "create development app"
+            create_app(app_identifier:dev_app_identifier, name:app_name, env:"development", git_branch: git_branch_enterprise, enabled_services: enabled_services)
+        end
+    
+        if env == "staging"
+            desc "create staging app"
+            create_app(app_identifier:stg_app_identifier, name:app_name, env:"staging", git_branch: git_branch_enterprise, enabled_services: enabled_services)
+        end
+        
+        if env == "development"
+            desc "creating development provisioning profile"
+            create_provisioning_profile(app_identifier:dev_app_identifier, type: "development", git_branch: git_branch_enterprise)
+        end
+    
+        if env == "staging"
+            desc "creating development provisioning profile for staging"
+            create_provisioning_profile(app_identifier:stg_app_identifier, type: "development", git_branch: git_branch_enterprise)
+    
+            desc "creating in-house distribution provisioning profile for staging"
+            create_provisioning_profile(app_identifier:stg_app_identifier, type: "enterprise", git_branch: git_branch_enterprise)
+        end         
+    else
+        app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
+        create_app(app_identifier:app_identifier, name:app_name, env:"production", enabled_services: enabled_services)
+        create_provisioning_profile(app_identifier:app_identifier, type: "appstore", git_branch: team_id)
+    end    
+   
+end
+
+#### CREATE PUSH NOTIFICATION CERTIFICATE ####
+lane :create_push_notification_certificate do |options| 
+       
+    git_url = get_git_url()
+    
+    if !git_url
+        UI.user_error!("Please specify git repository for push certificate in Matchfile")
+    end
+
+    if !options[:name] 
+        UI.user_error!("Please provide a value for the name parameter")
+    end
+
+    team_id = choose_team()          
+    client = Spaceship::Portal.client
+    client.team_id = team_id
+    is_enterprise = is_in_house()    
+    app_name = options[:name]
+    keychain_password = options[:keychain_password]
+ 
+    env = get_environment(options)
+
+    if (env != "development" && env != "staging" && env != "production")
+        UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
+    end
+    
+    if !is_enterprise
+        env = "production"
+    end
+
+    password = Security::GenericPassword.find(service:push_notification_cert_password_key).password
+
+    git_branch = ""
+    app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+    
+    if is_enterprise
+        git_branch = push_cert_git_branch_enterprise
+    else 
+        git_branch = "#{team_id}_push"
+    end      
+
+    storage = Match::Storage.for_mode("git",{
+        git_url: git_url,
+        shallow_clone: false,
+        git_branch: git_branch
+    })
+
+    storage.download
+
+    encryption = Match::Encryption.for_storage_mode("git", { git_url: git_url, working_directory: storage.working_directory, git_branch: git_branch})
+
+    repo_dir = storage.working_directory
+    
+    UI.message("Repo dir: " + repo_dir)
+
+
+    UI.message("Generating certificate...")
+    output_path = "#{repo_dir}/#{app_name}/#{env}"
+
+    #### Generate DEV Push notification certificates ######
+    if env == "development" || env == "staging"
+        file_path = "#{output_path}/DEV" 
+        FileUtils.mkdir_p(file_path)
+
+        pem(
+            development: true,
+            generate_p12: true,
+            p12_password: password,
+            save_private_key: true,
+            app_identifier: app_identifier,
+            username: apple_id,
+            team_id: team_id,
+            pem_name: app_name,
+            output_path: file_path
+        )
+    
+        item_path = "#{file_path}/#{app_name}.p12" 
+        UI.message("Importing development certificate to " + item_path)   
+        import_push_notification_certificate(file_path:item_path)
+    end
+   
+    file_path = "#{output_path}/PROD" 
+
+    #### Generate Production Push notification certificates ######
+    pem(
+        development: false,
+        generate_p12: true,
+        p12_password: password,
+        save_private_key: true,
+        app_identifier: app_identifier,
+        username: apple_id,
+        team_id: team_id,
+        pem_name: app_name,
+        output_path: file_path
+    )
+        
+    item_path = "#{file_path}/#{app_name}.p12" 
+    UI.message("Importing production certificate to " + item_path)   
+    import_push_notification_certificate(file_path:item_path, keychain_password:keychain_password)
+    UI.message("encrypting folder #{repo_dir}")   
+    encryption.encrypt_files
+    files_to_commit = Dir[File.join(storage.working_directory, "**", "*.{p12}")]
+    UI.message("Committing changes...")
+    storage.save_changes!(files_to_commit: files_to_commit, custom_message: "added push notification certificates")
+    storage.clear_changes
+            
+end
+
+lane :renew do |options| 
+
+       
+    if !options[:type]  
+        UI.user_error!("Please provide a type parameter development/enterprise/distribution")
+    end
+
+    type = options[:type];
+    team_id = options[:team_id]
+    
+    if !team_id
+        team_id = choose_team() 
+    end
+
+   
+    client = Spaceship::Portal.client
+    client.team_id = team_id
+    is_enterprise = is_in_house()    
+    available_apps = Spaceship.app.all
+    UI.message("is_enterprise" + "#{is_enterprise}")
+  
+    git_branch = ""
+    
+    if is_enterprise
+      git_branch = "enterprise"
+    else
+      git_branch = "#{team_id}"
+    end 
+
+    git_url = get_git_url()
+    cli = "fastlane match nuke #{type} --git_branch #{git_branch}"
+    UI.message("copy this command and run: #{cli}")   
+end
+
+lane :list_teams do |options|
+    id = ask("Please enter App Store Connect login ID: ")
+    password = ask("Please App Store Connect password: ") { |q| q.echo = "*" }
+
+    Spaceship::Tunes.login(id, password)
+
+    Spaceship::Tunes.select_team
+end 
+
+#### PRIVATE LANES ####
+
+private_lane :get_git_url do
+    params = FastlaneCore::Configuration.create(Match::Options.available_options, {})
+    params.load_configuration_file("Matchfile")
+    git_url = params[:git_url]
+    git_url
+end
+
+private_lane :get_environment do |options|
+    env = options[:env] ? options[:env] : "development"
+    env
+end 
+
+private_lane :get_bundle_identifier do |options|
+    env = options[:env]
+    team_id = options[:team_id]
+    bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
+    app_identifier = "#{bundle_identifier}."
+    root_bundle_identifier = env == "development" ? dev_bundle_identifier : env == "staging" ?  stg_bundle_identifier : app_identifier
+    root_bundle_identifier
+end 
+
+#import p12 certificate file into Login keychain
+private_lane :import_push_notification_certificate do |options|
+    
+        file_path = options[:file_path]
+        keychain_password = options[:keychain_password]
+ 
+        if !File.file?(file_path)
+            UI.user_error!("could not find file: " + file_path)
+        end
+    
+        passwordItem = Security::GenericPassword.find(service:push_notification_cert_password_key)
+    
+        if !passwordItem
+            UI.user_error!("could not find push notification certificate password in local keychain")
+        end
+    
+        keychain_path = FastlaneCore::Helper.keychain_path("Login")
+            
+        FastlaneCore::KeychainImporter.import_file(file_path, keychain_path, keychain_password: keychain_password, certificate_password: passwordItem.password) 
+    end
+
+#prompt user once for push notification certificate password and store in keychain
+private_lane :prompt_for_push_notification_certificate_password do |options|
+    
+    returnValue = ""
+    item = Security::GenericPassword.find(service:push_notification_cert_password_key)
+    if (!item)
+        password = ask("Please enter push notification certificate password: ") { |q| q.echo = "*" }
+        Security::GenericPassword.add(push_notification_cert_password_key, "BlueChilli", password)
+        returnValue = password
+    else
+        returnValue = item.password
+    end    
+
+    returnValue
+end
+
+# Create app bundle Id
+private_lane :create_app do |options|
+    env = options[:env]
+    app_name = options[:name]
+    app_identifier = options[:app_identifier]
+    app = Spaceship.app.find(app_identifier)
+    client = Spaceship::Portal.client
+    team_id = client.team_id
+    is_enterprise = client.in_house?
+    application_name = is_enterprise ? "#{app_name} #{env}" : "#{app_name}"
+    enabled_services = options[:enabled_services]
+
+    if app
+        UI.user_error!("app:#{app_name} already exists for team: #{team_id}")
+    end
+    
+    if (!enabled_services)
+        enabled_services = get_default_enabled_services()
+    end
+
+    UI.message("Creating app:#{app_name} with app_bundle_id:#{app_identifier} for team: #{team_id}")
+    produce(
+        username: apple_id,
+        app_identifier: app_identifier,
+        app_name: application_name ,
+        skip_itc: true,
+        team_id: team_id,        
+        enable_services: enabled_services
+    )
+end
+
+# Create provisioning profile
+private_lane :create_provisioning_profile do |options|
+    type = options[:type]
+    app_identifier = options[:app_identifier]
+    git_branch = options[:git_branch]
+    team_id = Spaceship::Portal.client.team_id    
+    match(type:type, app_identifier: app_identifier, git_branch: git_branch, team_id: team_id)
+end
+
+private_lane :is_enterprise do 
+    Spaceship::Portal.client.in_house
+end    
+
+private_lane :choose_team do 
+    team_id = Spaceship.select_team
+
+    if !team_id
+        UI.user_error!("Please select a team")
+    end
+
+    team_id
+end
+
+private_lane :get_app_identifier_config do 
+    jsonData = File.read(app_identifiers_config)
+    data = JSON.parse(jsonData)
+    data
+end
+
+private_lane :save_app_identifier_config do |options|
+    data = options[:config]
+    File.open(app_identifiers_config,"w") do |f|
+        f.write(data.to_json)
+    end
+end    
+
+private_lane :get_for_app_identifier_for_team do |option|
+    team_id = option[:team_id]
+    data = get_app_identifier_config()
+    if !data[team_id]
+        app_bundle_prefix = ask("Please enter App Bundle Id for this team #{team_id} prefix? eg. com.bluechilli : ") { |q|}
+        data[team_id] = app_bundle_prefix
+        save_app_identifier_config(config: data)
+        commit_changes(path:".", message:"app bundle identifiers updated", git_url:fastlane_script_git_url, git_branch:"master") 
+    end
+
+    data[team_id]
+end    
+
+private_lane :get_default_enabled_services do 
+    default_enable_services = {
+        associated_domains: "on",     
+        push_notification: "on",
+        in_app_purchase: "on",
+        data_protection: "complete"
+    }
+    default_enable_services
+end
+
+private_lane :is_in_house do
+    team_information = Spaceship::Portal.client.team_information
+    in_house = (team_information['type'] == 'In-House')
+    in_house
+end
+
+
+private_lane :commit_changes do |option|
+    path = option[:path]
+    message = option[:message]
+    git_url = option[:git_url]
+    branch = option[:git_branch]
+
+    if !branch
+        branch = "master"
+    end
+
+    Dir.chdir(path) do
+      return if `git status`.include?("nothing to commit")
+
+      commands = []
+      commands << "git add -A"
+      commands << "git commit -m #{message.shellescape}"
+      commands << "GIT_TERMINAL_PROMPT=0 git push origin #{branch.shellescape}"
+
+      UI.message "Pushing changes to remote git repo..."
+
+      commands.each do |command|
+        FastlaneCore::CommandExecutor.execute(command: command,
+                                            print_all: FastlaneCore::Globals.verbose?,
+                                        print_command: FastlaneCore::Globals.verbose?)
+      end
+    end
+  end
