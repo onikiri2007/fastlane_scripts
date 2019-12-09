@@ -28,7 +28,7 @@ config = CredentialsManager::AppfileConfig
 apple_id = config.try_fetch_value(:apple_id)
 dev_bundle_identifier = "com.bluechilli.d."
 stg_bundle_identifier = "com.bluechilli.s."
-push_notification_cert_password_key = "com.bluechilli.PushNotificationCertificatePassword"
+push_notification_cert_password_key = "com.onikiri.PushNotificationCertificatePassword"
 app_identifiers_config= "app-identifiers.json"
 fastlane_script_git_url = "git@bitbucket.org:bluechilli/fastlane_scripts.git"
 
@@ -52,7 +52,13 @@ lane :certificates do |options|
     team_id = options[:team_id]
     keychain_name = options[:keychain_name]
     keychain_password = options[:keychain_password]
-  
+    env = options[:env]
+
+    if !options[:env] 
+        UI.user_error!("Please provide environment eg. development, staging, production")
+        return
+    end
+
     if readonly == nil 
         readonly = true;
     end
@@ -63,6 +69,16 @@ lane :certificates do |options|
 
     if !team_id
         team_id = choose_team() 
+    end
+
+    type = "development"
+
+    if env == "staging" 
+        type = "adhoc"
+    end
+
+    if env == "production"
+        type = "appstore"
     end
 
     client = Spaceship::Portal.client
@@ -79,15 +95,24 @@ lane :certificates do |options|
         stg_bundle_identifiers = stg_apps.collect { |a| "#{a.bundle_id}"}
         bundle_identifiers = dev_bundle_identifiers.concat(stg_bundle_identifiers)
         match(type:'development', app_identifier: bundle_identifiers, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        match(type:'enterprise', app_identifier: stg_bundle_identifiers, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        match(type:'enterprise', app_identifier: stg_bundle_identifiers, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)    
     else
-        bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
-        apple_bundle_identifier = "#{bundle_identifier}."
-        exclude_id = "#{apple_bundle_identifier}*"
-        prod_apps = available_apps.select { |a| a.bundle_id.include? apple_bundle_identifier }
-        all_apps = prod_apps.select { |a| a.bundle_id != exclude_id }
-        bundle_identifiers = all_apps.collect { |a| "#{a.bundle_id}"}
-        match(type:'appstore', app_identifier: bundle_identifiers, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        if env == "staging" || env == "development"
+            bundle_identifier = get_bundle_identifier(team_id: team_id, env: env) 
+            adhoc_bundle_identifier = "#{bundle_identifier}"
+            adhoc_apps = available_apps.select { |a| a.bundle_id.include? adhoc_bundle_identifier }
+            adhoc_bundle_identifiers = adhoc_apps.collect { |a| "#{a.bundle_id}"}
+            branch = "#{team_id}_#{env}"
+            match(type:type, app_identifier: adhoc_bundle_identifiers, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        else
+            bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
+            apple_bundle_identifier = "#{bundle_identifier}"
+            exclude_id = "#{apple_bundle_identifier}*"
+            prod_apps = available_apps.select { |a| a.bundle_id.include? apple_bundle_identifier }
+            all_apps = prod_apps.select { |a| a.bundle_id != exclude_id }
+            bundle_identifiers = all_apps.collect { |a| "#{a.bundle_id}"}
+            match(type:type, app_identifier: bundle_identifiers, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
     end    
 end
 
@@ -132,10 +157,24 @@ lane :certificate do |options|
             stg_app = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
             match(type:'enterprise', app_identifier: stg_app, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
         end
-            
+
     else
-        app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
-        match(type:'appstore', app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        branch = "#{team_id}_#{env}"
+         # Filter the Dev and Staging apps
+        if env == "development"
+            dev_app = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
+            match(type:'development', app_identifier: dev_app, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
+
+        if env == "staging"
+            stg_app = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
+            match(type:'adhoc', app_identifier: stg_app, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
+
+        if(env == "production" )
+            app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
+            match(type:'appstore', app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
+        end
     end    
 end 
 
@@ -429,8 +468,7 @@ private_lane :get_bundle_identifier do |options|
     env = options[:env]
     team_id = options[:team_id]
     bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
-    app_identifier = "#{bundle_identifier}."
-    root_bundle_identifier = env == "development" ? dev_bundle_identifier : env == "staging" ?  stg_bundle_identifier : app_identifier
+    root_bundle_identifier = env == "development" ? "#{bundle_identifier}.d." : env == "staging" ? "#{bundle_identifier}.s." : "#{bundle_identifier}."
     root_bundle_identifier
 end 
 
