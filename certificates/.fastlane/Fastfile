@@ -52,11 +52,10 @@ lane :certificates do |options|
     team_id = options[:team_id]
     keychain_name = options[:keychain_name]
     keychain_password = options[:keychain_password]
-    env = options[:env]
+    env = get_environment(options)
 
-    if !options[:env] 
-        UI.user_error!("Please provide environment eg. development, staging, production")
-        return
+    if (env != "development" && env != "staging" && env != "production")
+        UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
     end
 
     if readonly == nil 
@@ -71,21 +70,13 @@ lane :certificates do |options|
         team_id = choose_team() 
     end
 
-    type = "development"
-
-    if env == "staging" 
-        type = "adhoc"
-    end
-
-    if env == "production"
-        type = "appstore"
-    end
+    type = get_type(options)
 
     client = Spaceship::Portal.client
     client.team_id = team_id
     is_enterprise = is_in_house()    
     available_apps = Spaceship.app.all
-    UI.message("is_enterprise" + "#{is_enterprise}")
+    UI.message("is_enterprise" + ": #{is_enterprise}")
 
     if is_enterprise
         # Filter the Dev and Staging apps
@@ -102,7 +93,7 @@ lane :certificates do |options|
             adhoc_bundle_identifier = "#{bundle_identifier}"
             adhoc_apps = available_apps.select { |a| a.bundle_id.include? adhoc_bundle_identifier }
             adhoc_bundle_identifiers = adhoc_apps.collect { |a| "#{a.bundle_id}"}
-            branch = "#{team_id}_#{env}"
+            branch = get_branch_name(env:env, team_id: team_id)
             match(type:type, app_identifier: adhoc_bundle_identifiers, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
         else
             bundle_identifier = get_for_app_identifier_for_team(team_id: team_id)
@@ -121,15 +112,19 @@ lane :certificate do |options|
     readonly = options[:readonly]
     recreate = options[:recreate]
     team_id = options[:team_id]
-    env = options[:env]
     keychain_name = options[:keychain_name]
     keychain_password = options[:keychain_password]
- 
+    env = get_environment(options)
+
     if !options[:name] 
         UI.user_error!("Please provide a value for the name parameter")
     end
 
     app_name = options[:name]
+    
+    if (env != "development" && env != "staging" && env != "production")
+        UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
+    end
 
     if readonly == nil 
         readonly = true;
@@ -144,37 +139,17 @@ lane :certificate do |options|
     end
 
     is_enterprise = is_in_house()    
-    UI.message("is_enterprise" + "#{is_enterprise}")
+    UI.message("is_enterprise" + ": #{is_enterprise}")
 
     if is_enterprise
-        # Filter the Dev and Staging apps
-        if !env || env == "development"
-            dev_app = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
-            match(type:'development', app_identifier: dev_app, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        end
-
-        if !env || env == "staging"
-            stg_app = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
-            match(type:'enterprise', app_identifier: stg_app, readonly: readonly, force:recreate, git_branch:git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        end
-
+        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        type = get_type(env: env)
+        match(type:type, app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
     else
-        branch = "#{team_id}_#{env}"
-         # Filter the Dev and Staging apps
-        if env == "development"
-            dev_app = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
-            match(type:'development', app_identifier: dev_app, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        end
-
-        if env == "staging"
-            stg_app = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
-            match(type:'adhoc', app_identifier: stg_app, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        end
-
-        if(env == "production" )
-            app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
-            match(type:'appstore', app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: team_id ,team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
-        end
+        branch = get_branch_name(env: env, team_id: team_id)
+        type = get_type(env: env)
+        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        match(type:type, app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
     end    
 end 
 
@@ -260,41 +235,41 @@ lane :setup_app do |options|
     if (env != "development" && env != "staging" && env != "production")
         UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
     end
-
-    if !is_enterprise
-        env = "production"
-    end
     
     if is_enterprise
         dev_app_identifier = "#{get_bundle_identifier(env:"development", team_id: team_id)}#{app_name}"
         stg_app_identifier = "#{get_bundle_identifier(env:"staging", team_id: team_id)}#{app_name}"
 
         if env == "development"
-            desc "create development app"
+            UI.message("create development app")
             create_app(app_identifier:dev_app_identifier, name:app_name, env:"development", git_branch: git_branch_enterprise, enabled_services: enabled_services)
         end
     
         if env == "staging"
-            desc "create staging app"
+            UI.message("create staging app")
             create_app(app_identifier:stg_app_identifier, name:app_name, env:"staging", git_branch: git_branch_enterprise, enabled_services: enabled_services)
         end
         
         if env == "development"
-            desc "creating development provisioning profile"
+            UI.message("creating development provisioning profile")
             create_provisioning_profile(app_identifier:dev_app_identifier, type: "development", git_branch: git_branch_enterprise)
         end
     
         if env == "staging"
-            desc "creating development provisioning profile for staging"
+            UI.message("creating development provisioning profile for staging")
             create_provisioning_profile(app_identifier:stg_app_identifier, type: "development", git_branch: git_branch_enterprise)
     
-            desc "creating in-house distribution provisioning profile for staging"
+            UI.message("creating in-house distribution provisioning profile for staging")
             create_provisioning_profile(app_identifier:stg_app_identifier, type: "enterprise", git_branch: git_branch_enterprise)
         end         
     else
-        app_identifier = "#{get_bundle_identifier(env:"production", team_id: team_id)}#{app_name}"
-        create_app(app_identifier:app_identifier, name:app_name, env:"production", enabled_services: enabled_services)
-        create_provisioning_profile(app_identifier:app_identifier, type: "appstore", git_branch: team_id)
+        type = get_type(env:env)
+        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        branch = get_branch_name(env:env, team_id: team_id)
+        UI.message("create app for #{app_identifier}")
+        create_app(app_identifier:app_identifier, name:app_name, env:env, git_branch: branch, enabled_services: enabled_services)
+        UI.message("creating provisioning profile for #{type} with branch: #{branch}")
+        create_provisioning_profile(app_identifier:app_identifier, type: type, git_branch: branch)
     end    
    
 end
@@ -633,3 +608,25 @@ private_lane :commit_changes do |option|
       end
     end
   end
+
+private_lane :get_type do |options|
+  env = get_environment(options) 
+    type = "development"
+ 
+    if env == "staging" 
+        type = "adhoc"
+    end
+
+    if env == "production"
+        type = "appstore"
+    end
+
+    type
+end
+
+private_lane :get_branch_name do |options|
+  env = get_environment(options) 
+  team_id = options[:team_id]
+  branch = "#{team_id}"
+  branch
+end
