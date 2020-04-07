@@ -299,11 +299,7 @@ lane :create_push_notification_certificate do |options|
     if (env != "development" && env != "staging" && env != "production")
         UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
     end
-    
-    if !is_enterprise
-        env = "production"
-    end
-
+  
     password = Security::GenericPassword.find(service:push_notification_cert_password_key).password
 
     git_branch = ""
