@@ -15,7 +15,7 @@ Install _fastlane_ using
 or alternatively using `brew cask install fastlane`
 
 1. open Matchfile
-2, change the git_url to your repository where you store certificates
+2. change the git_url to your repository where you store certificates
 
 # Available Actions
 ### certificate_cli
