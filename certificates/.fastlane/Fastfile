@@ -26,11 +26,11 @@ default_platform :ios
 config = CredentialsManager::AppfileConfig
 
 apple_id = config.try_fetch_value(:apple_id)
-dev_bundle_identifier = "com.bluechilli.d."
-stg_bundle_identifier = "com.bluechilli.s."
-push_notification_cert_password_key = "com.onikiri.PushNotificationCertificatePassword"
+dev_bundle_identifier = "co.insight.d."
+stg_bundle_identifier = "com.insight.s."
+push_notification_cert_password_key = "co.insight.PushNotificationCertificatePassword"
 app_identifiers_config= "app-identifiers.json"
-fastlane_script_git_url = "git@bitbucket.org:bluechilli/fastlane_scripts.git"
+fastlane_script_git_url = "git@github.com:Insight-Timer/flutter-ios-signing-certificates.git"
 
 # Login to developer portal
 Spaceship::Portal.login(apple_id)
@@ -115,9 +115,10 @@ lane :certificate do |options|
     keychain_name = options[:keychain_name]
     keychain_password = options[:keychain_password]
     env = get_environment(options)
-
-    if !options[:name] 
-        UI.user_error!("Please provide a value for the name parameter")
+    app_identifier = options[:app_identifier]
+  
+    if !options[:name] && !app_identifier
+        UI.user_error!("Please provide a value for the name or app_identifier parameter")
     end
 
     app_name = options[:name]
@@ -142,13 +143,17 @@ lane :certificate do |options|
     UI.message("is_enterprise" + ": #{is_enterprise}")
 
     if is_enterprise
-        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        if !app_identifier
+            app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        end
         type = get_type(env: env)
         match(type:type, app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: git_branch_enterprise, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
     else
         branch = get_branch_name(env: env, team_id: team_id)
         type = get_type(env: env)
-        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        if !app_identifier
+            app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        end
         match(type:type, app_identifier: app_identifier, readonly: readonly, force:recreate, git_branch: branch, team_id: team_id, keychain_name: keychain_name, keychain_password: keychain_password)
     end    
 end 
@@ -213,9 +218,10 @@ lane :setup_app do |options|
     client = Spaceship::Portal.client
     client.team_id = team_id
     is_enterprise = is_in_house()
+    app_identifier = options[:app_identifier]
   
-    if !options[:name] 
-        UI.user_error!("Please provide a value for the name parameter")
+    if !options[:name] && !app_identifier
+        UI.user_error!("Please provide a value for the name or app_identifier parameter")
     end
 
     app_name = options[:name]
@@ -224,6 +230,7 @@ lane :setup_app do |options|
     default_enable_services = get_default_enabled_services()
 
     enabled_services = default_enable_services
+  
 
     if(services)
         service_items = services.split(',')
@@ -264,7 +271,9 @@ lane :setup_app do |options|
         end         
     else
         type = get_type(env:env)
-        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        if !app_identifier
+            app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+        end
         branch = get_branch_name(env:env, team_id: team_id)
         UI.message("create app for #{app_identifier}")
         create_app(app_identifier:app_identifier, name:app_name, env:env, git_branch: branch, enabled_services: enabled_services)
@@ -282,10 +291,12 @@ lane :create_push_notification_certificate do |options|
     if !git_url
         UI.user_error!("Please specify git repository for push certificate in Matchfile")
     end
-
-    if !options[:name] 
-        UI.user_error!("Please provide a value for the name parameter")
+    app_identifier = options[:app_identifier]
+  
+    if !options[:name] && !app_identifier
+        UI.user_error!("Please provide a value for the name or app_identifier parameter")
     end
+
 
     team_id = choose_team()          
     client = Spaceship::Portal.client
@@ -293,7 +304,7 @@ lane :create_push_notification_certificate do |options|
     is_enterprise = is_in_house()    
     app_name = options[:name]
     keychain_password = options[:keychain_password]
- 
+   
     env = get_environment(options)
 
     if (env != "development" && env != "staging" && env != "production")
@@ -303,7 +314,9 @@ lane :create_push_notification_certificate do |options|
     password = Security::GenericPassword.find(service:push_notification_cert_password_key).password
 
     git_branch = ""
-    app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+    if !app_identifier
+        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
+    end
     
     if is_enterprise
         git_branch = push_cert_git_branch_enterprise
