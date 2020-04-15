@@ -219,9 +219,10 @@ lane :setup_app do |options|
     client.team_id = team_id
     is_enterprise = is_in_house()
     app_identifier = options[:app_identifier]
+    app_name = options[:app_name]
   
-    if !options[:name] && !app_identifier
-        UI.user_error!("Please provide a value for the name or app_identifier parameter")
+    if !app_name || !app_identifier
+        UI.user_error!("Please provide a value for the app_name and app_identifier parameter")
     end
 
     app_name = options[:name]
