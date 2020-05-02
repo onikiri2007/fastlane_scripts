@@ -27,11 +27,11 @@ default_platform :ios
 config = CredentialsManager::AppfileConfig
 
 apple_id = config.try_fetch_value(:apple_id)
-dev_bundle_identifier = "co.insight.d."
-stg_bundle_identifier = "com.insight.s."
-push_notification_cert_password_key = "co.insight.PushNotificationCertificatePassword"
+dev_bundle_identifier = ""
+stg_bundle_identifier = ""
+push_notification_cert_password_key = "pushNotificationCertificatePassword"
 app_identifiers_config= "app-identifiers.json"
-fastlane_script_git_url = "git@github.com:Insight-Timer/flutter-ios-signing-certificates.git"
+fastlane_script_git_url = ""
 
 # Login to developer portal
 Spaceship::Portal.login(apple_id)
@@ -388,7 +388,7 @@ lane :create_push_notification_certificate do |options|
         UI.message("Importing production certificate to " + item_path)   
         import_push_notification_certificate(file_path:item_path, keychain_password:keychain_password)
     end if
-    
+
     UI.message("encrypting folder #{repo_dir}")   
     encryption.encrypt_files
     files_to_commit = Dir[File.join(storage.working_directory, "**", "*.{p12}")]
