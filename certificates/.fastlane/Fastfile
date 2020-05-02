@@ -224,8 +224,7 @@ lane :setup_app do |options|
     if !app_name || !app_identifier
         UI.user_error!("Please provide a value for the app_name and app_identifier parameter")
     end
-
-    app_name = options[:name]
+   
     env = get_environment(options)
     services = options[:enable_services]
     default_enable_services = get_default_enabled_services()

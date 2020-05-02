@@ -1,3 +1,4 @@
+## add your certificate git repo
 #git_url "git@bitbucket.org:gheorg/certificates.git"
 
 #type "development" # The default type, can be: appstore, adhoc, enterprise or development
