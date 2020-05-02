@@ -367,25 +367,28 @@ lane :create_push_notification_certificate do |options|
         UI.message("Importing development certificate to " + item_path)   
         import_push_notification_certificate(file_path:item_path)
     end
-   
-    file_path = "#{output_path}/PROD" 
 
-    #### Generate Production Push notification certificates ######
-    pem(
-        development: false,
-        generate_p12: true,
-        p12_password: password,
-        save_private_key: true,
-        app_identifier: app_identifier,
-        username: apple_id,
-        team_id: team_id,
-        pem_name: app_identifier,
-        output_path: file_path
-    )
-        
-    item_path = "#{file_path}/#{app_identifier}.p12" 
-    UI.message("Importing production certificate to " + item_path)   
-    import_push_notification_certificate(file_path:item_path, keychain_password:keychain_password)
+    if env == "production"
+        file_path = "#{output_path}/PROD" 
+
+        #### Generate Production Push notification certificates ######
+        pem(
+            development: false,
+            generate_p12: true,
+            p12_password: password,
+            save_private_key: true,
+            app_identifier: app_identifier,
+            username: apple_id,
+            team_id: team_id,
+            pem_name: app_identifier,
+            output_path: file_path
+        )
+            
+        item_path = "#{file_path}/#{app_identifier}.p12" 
+        UI.message("Importing production certificate to " + item_path)   
+        import_push_notification_certificate(file_path:item_path, keychain_password:keychain_password)
+    end if
+    
     UI.message("encrypting folder #{repo_dir}")   
     encryption.encrypt_files
     files_to_commit = Dir[File.join(storage.working_directory, "**", "*.{p12}")]
