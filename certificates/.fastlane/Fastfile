@@ -6,6 +6,7 @@ fastlane_require 'shellwords'
 fastlane_require 'highline/import'
 fastlane_require 'spaceship'
 fastlane_require 'json'
+fastlane_require 'security'
 
 # More documentation about how to customize your build
 # can be found here:
@@ -193,8 +194,8 @@ lane :push_notification_certificates do |options|
 
     storage.download
 
-    encryption = Match::Encryption.for_storage_mode("git", { git_url: git_url, working_directory: storage.working_directory, git_branch: git_branch})
-    encryption.decrypt_files
+    #encryption = Match::Encryption.for_storage_mode("git", { git_url: git_url, working_directory: storage.working_directory, git_branch: git_branch})
+    #encryption.decrypt_files
 
     UI.message("Repo dir: " + storage.working_directory)
 
@@ -293,7 +294,7 @@ lane :create_push_notification_certificate do |options|
     end
     app_identifier = options[:app_identifier]
   
-    if !options[:name] && !app_identifier
+    if !app_identifier
         UI.user_error!("Please provide a value for the name or app_identifier parameter")
     end
 
@@ -311,13 +312,16 @@ lane :create_push_notification_certificate do |options|
         UI.user_error!("environment must be either 'development' or 'staging' or 'production' ")
     end
   
-    password = Security::GenericPassword.find(service:push_notification_cert_password_key).password
+    item = Security::GenericPassword.find(server: push_notification_cert_password_key)
+    if !item
+        password = prompt_for_push_notification_certificate_password()
+    else
+        password = item.password        
+    end if
+   
 
     git_branch = ""
-    if !app_identifier
-        app_identifier = "#{get_bundle_identifier(env:env, team_id: team_id)}#{app_name}"
-    end
-    
+   
     if is_enterprise
         git_branch = push_cert_git_branch_enterprise
     else 
@@ -340,7 +344,7 @@ lane :create_push_notification_certificate do |options|
 
 
     UI.message("Generating certificate...")
-    output_path = "#{repo_dir}/#{app_name}/#{env}"
+    output_path = "#{repo_dir}/#{app_identifier}/#{env}"
 
     #### Generate DEV Push notification certificates ######
     if env == "development" || env == "staging"
@@ -355,11 +359,11 @@ lane :create_push_notification_certificate do |options|
             app_identifier: app_identifier,
             username: apple_id,
             team_id: team_id,
-            pem_name: app_name,
+            pem_name: app_identifier,
             output_path: file_path
         )
     
-        item_path = "#{file_path}/#{app_name}.p12" 
+        item_path = "#{file_path}/#{app_identifier}.p12" 
         UI.message("Importing development certificate to " + item_path)   
         import_push_notification_certificate(file_path:item_path)
     end
@@ -375,11 +379,11 @@ lane :create_push_notification_certificate do |options|
         app_identifier: app_identifier,
         username: apple_id,
         team_id: team_id,
-        pem_name: app_name,
+        pem_name: app_identifier,
         output_path: file_path
     )
         
-    item_path = "#{file_path}/#{app_name}.p12" 
+    item_path = "#{file_path}/#{app_identifier}.p12" 
     UI.message("Importing production certificate to " + item_path)   
     import_push_notification_certificate(file_path:item_path, keychain_password:keychain_password)
     UI.message("encrypting folder #{repo_dir}")   
@@ -484,7 +488,7 @@ private_lane :prompt_for_push_notification_certificate_password do |options|
     item = Security::GenericPassword.find(service:push_notification_cert_password_key)
     if (!item)
         password = ask("Please enter push notification certificate password: ") { |q| q.echo = "*" }
-        Security::GenericPassword.add(push_notification_cert_password_key, "BlueChilli", password)
+        Security::GenericPassword.add(push_notification_cert_password_key, "apple_certificates", password)
         returnValue = password
     else
         returnValue = item.password
